@@ -1,5 +1,6 @@
 const express = require("express")
 const { body, validationResult } = require("express-validator")
+const mongoose = require("mongoose"); // ✅ This is the missing line
 const DrugShipment = require("../models/DrugShipment")
 const ShipmentAcknowledgment = require("../models/ShipmentAcknowledgment")
 const Drug = require("../models/Drugs")
@@ -33,9 +34,9 @@ router.get("/", protect, async (req, res) => { // Added protect middleware
     if (selectType) filter.selectType = selectType
 
     const shipments = await DrugShipment.find(filter)
-      .populate("study", "studyName")
+      .populate("study", "study_name")
       .populate("siteNumber", "siteName siteId")
-      .populate("drug", "drugName remainingQuantity")
+      .populate("drug", "drug_name remaining_quantity")
       .populate("groupName", "groupName")
       .populate("excelRows")
       .sort({ shipmentDate: -1 })
@@ -141,10 +142,17 @@ router.post(
         req.user.email,
       )
 
-      res.status(201).json({
-        message: "Shipment created successfully",
-        shipment: await shipment.populate(["study", "siteNumber", "drug", "groupName", "excelRows"]),
-      })
+    res.status(201).json({
+      message: "Shipment created successfully",
+      shipment: await shipment.populate([
+        { path: "study", select: "study_name" },
+        { path: "siteNumber", select: "siteName siteId" },
+        { path: "drug", select: "drug_name remaining_quantity" },
+        { path: "groupName", select: "group_name" },
+        { path: "excelRows" },
+      ]),
+    })
+
     } catch (error) {
       console.error("Error creating shipment:", error)
       res.status(500).json({ message: "Server error", error: error.message })
@@ -158,12 +166,12 @@ const processDrugShipment = async (shipment, drugIds, quantities) => {
     const drug = await Drug.findById(drugId)
     const quantity = quantities[drugId] || 0
 
-    if (quantity > drug.remainingQuantity) {
-      throw new Error(`Insufficient quantity for ${drug.drugName}`)
+    if (quantity > drug.remaining_quantity) {
+      throw new Error(`Insufficient quantity for ${drug.drug_name}`)
     }
 
     // Update drug quantity
-    drug.remainingQuantity -= quantity
+    drug.remaining_quantity -= quantity
     await drug.save()
 
     // Create acknowledgment record
@@ -207,47 +215,103 @@ const processDrugGroupShipment = async (shipment, groupIds, quantities) => {
 }
 
 // Helper function to process randomization shipment
+// Helper function to process randomization shipment
 const processRandomizationShipment = async (shipment, excelRowIds) => {
+  console.log("Processing randomization shipment with excelRowIds:", excelRowIds);
+  
   for (const rowId of excelRowIds) {
+    // Validate that the ExcelDataRow exists before processing
+    const excelRow = await ExcelDataRow.findById(rowId);
+    if (!excelRow) {
+      console.warn(`ExcelDataRow with ID ${rowId} not found`);
+      continue;
+    }
+    
     // Mark Excel row as sent
-    await ExcelDataRow.findByIdAndUpdate(rowId, { sent: true })
+    await ExcelDataRow.findByIdAndUpdate(rowId, { sent: true });
 
-    // Create acknowledgment record
-    await ShipmentAcknowledgment.create({
+    // Create acknowledgment record with proper excelRow reference
+    const acknowledgment = await ShipmentAcknowledgment.create({
       shipment: shipment._id,
       study: shipment.study,
-      excelRow: rowId,
+      excelRow: rowId, // Make sure this is the correct ObjectId
       status: "Not Acknowledged",
-    })
+    });
+    
+    console.log("Created acknowledgment:", acknowledgment);
   }
 }
 
-// Get shipment by ID
-router.get("/:id", protect, async (req, res) => { // Added protect middleware
+router.get("/related-fields/:studyId", protect, async (req, res) => {
   try {
-    const shipment = await DrugShipment.findById(req.params.id)
+    const { studyId } = req.params;
+
+    const sites = await Site.find({ studies: studyId }).select("_id siteName siteId");
+
+    const drugGroups = await DrugGroup.find({ studies: studyId })
+      .populate("drugs", "_id drugName remainingQuantity")
+      .select("_id groupName drugs");
+
+    const drugs = await Drug.find({ studies: studyId })
+      .select("_id drug_name remaining_quantity")
+
+
+    const rawExcelRows = await ExcelDataRow.find({ studies: studyId, sent: false }).select("_id rowData");
+
+    const headersSet = new Set();
+    const excelRows = rawExcelRows.map((row) => {
+      const flatRow = {
+        ...row.rowData,
+        id: row._id.toString(),
+      };
+      Object.keys(flatRow).forEach((key) => headersSet.add(key));
+      return flatRow;
+    });
+
+    res.json({
+      sites,
+      drugGroups,
+      drugs,
+      excelRows,
+      headers: Array.from(headersSet),
+    });
+  } catch (error) {
+    console.error("Error fetching related fields:", error);
+    res.status(500).json({ message: "Failed to fetch related fields", error: error.message });
+  }
+});
+
+// 🔍 GET shipment by ID with ObjectId validation
+router.get("/:id", protect, async (req, res) => {
+  const { id } = req.params;
+
+  if (!mongoose.Types.ObjectId.isValid(id)) {
+    return res.status(400).json({ message: "Invalid shipment ID" });
+  }
+
+  try {
+    const shipment = await DrugShipment.findById(id)
       .populate("study", "studyName")
       .populate("siteNumber", "siteName siteId")
-      .populate("drug", "drugName remainingQuantity")
+      .populate("drug", "drug_name remaining_quantity")
       .populate("groupName", "groupName")
-      .populate("excelRows")
+      .populate("excelRows");
 
     if (!shipment) {
-      return res.status(404).json({ message: "Shipment not found" })
+      return res.status(404).json({ message: "Shipment not found" });
     }
 
     const acknowledgments = await ShipmentAcknowledgment.find({ shipment: shipment._id })
-      .populate("drug", "drugName")
+      .populate("drug", "drug_name")
       .populate("drugGroup", "groupName")
-      .populate("excelRow")
+      .populate("excelRow");
 
-    res.json({ shipment, acknowledgments })
+    res.json({ shipment, acknowledgments });
   } catch (error) {
-    console.error("Error fetching shipment:", error)
-    res.status(500).json({ message: "Server error", error: error.message })
+    console.error("Error fetching shipment:", error);
+    res.status(500).json({ message: "Server error", error: error.message });
   }
-})
-
+});
 // Update shipment
 router.put("/:id", protect, async (req, res) => { // Added protect middleware
   try {
@@ -334,44 +398,52 @@ router.post("/:id/acknowledge", protect, async (req, res) => { // Added protect 
   }
 })
 
-// Get related fields based on study
-router.get("/related-fields/:studyId", protect, async (req, res) => { // Added protect middleware
-  try {
-    const { studyId } = req.params
+// Get related fields based on study ID
+// router.get("/related-fields/:studyId", protect, async (req, res) => {
+//   try {
+//     const { studyId } = req.params;
 
-    // Get related sites
-    const sites = await Site.find({ studies: studyId }).select("_id siteName siteId")
+//     // 1. Get all related sites for the study
+//     const sites = await Site.find({ studies: studyId }).select("_id siteName siteId");
 
-    // Get drug groups with drugs
-    const drugGroups = await DrugGroup.find({ studies: studyId })
-      .populate("drugs", "_id drugName remainingQuantity")
-      .select("_id groupName drugs")
+//     // 2. Get drug groups for the study and populate associated drugs
+//     const drugGroups = await DrugGroup.find({ studies: studyId })
+//       .populate("drugs", "_id drugName remainingQuantity")
+//       .select("_id groupName drugs");
 
-    // Get individual drugs
-    const drugs = await Drug.find({ studies: studyId }).select("_id drugName remainingQuantity")
+//     // 3. Get individual drugs directly linked to the study
+//     const drugs = await Drug.find({ studies: studyId }).select("_id drugName remainingQuantity");
 
-    // Get Excel rows not sent
-    const excelRows = await ExcelDataRow.find({ studies: studyId, sent: false }).select("_id rowData")
+//     // 4. Get unsent Excel rows linked to the study
+//     const rawExcelRows = await ExcelDataRow.find({ studies: studyId, sent: false }).select("_id rowData");
 
-    // Collect headers from Excel rows
-    const headers = new Set()
-    const excelRowData = excelRows.map((row) => {
-      const data = { ...row.rowData, id: row._id }
-      Object.keys(data).forEach((key) => headers.add(key))
-      return data
-    })
+//     // 5. Extract headers and transform Excel row structure
+//     const headersSet = new Set();
+//     const excelRows = rawExcelRows.map((row) => {
+//       const flatRow = {
+//         ...row.rowData,
+//         id: row._id.toString(), // for frontend selection consistency
+//       };
+//       Object.keys(flatRow).forEach((key) => headersSet.add(key));
+//       return flatRow;
+//     });
 
-    res.json({
-      sites,
-      drugGroups,
-      drugs,
-      excelRows: excelRowData,
-      headers: Array.from(headers),
-    })
-  } catch (error) {
-    console.error("Error fetching related fields:", error)
-    res.status(500).json({ message: "Server error", error: error.message })
-  }
-})
+//     // 6. Respond with all gathered related data
+//     res.json({
+//       sites,
+//       drugGroups,
+//       drugs,
+//       excelRows,
+//       headers: Array.from(headersSet),
+//     });
+//   } catch (error) {
+//     console.error("Error fetching related fields:", error);
+//     res.status(500).json({
+//       message: "Failed to fetch related fields",
+//       error: error.message,
+//     });
+//   }
+// });
+
 
 module.exports = router

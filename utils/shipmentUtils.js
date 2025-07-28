@@ -3,7 +3,7 @@ const DrugShipment = require("../models/DrugShipment")
 const ShipmentAcknowledgment = require("../models/ShipmentAcknowledgment")
 const Drug = require("../models/Drugs")
 const DrugGroup = require("../models/DrugGroup")
-const ExcelDataRow = require("../models/ExcelModels")
+const { ExcelDataRow } = require("../models/ExcelModels")
 const nodemailer = require("nodemailer")
 
 // Generate unique shipment number

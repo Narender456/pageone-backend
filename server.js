@@ -24,6 +24,12 @@ const drugsRoutes = require("./routes/Drugs")
 const drugGroupsRoutes = require("./routes/DrugGroup")
 const excelRoutes = require('./routes/excelRoutes');
 const shipmentRoutes = require("./routes/shipments")
+const roleRoutes = require("./routes/roles")
+const menuOptionRoutes = require("./routes/menuOptions")
+const permissionRoutes = require("./routes/permissions")
+const stagesRoutes = require("./routes/stages")
+const formsRoutes = require("./routes/forms")
+const pageRoutes = require("./routes/pages")
 // const drugShipmentRoutes = require('./routes/drugShipmentRoutes');
 // const drugShipmentRoutes = require('./routes/DrugShipment');
 // const shipmentAcknowledgmentRoutes = require('./routes/ShipmentAcknowledgment');
@@ -86,6 +92,13 @@ app.use("/api/drugs", drugsRoutes)
 app.use("/api/drug-groups", drugGroupsRoutes)
 app.use('/api/excel', excelRoutes);
 app.use("/api/shipments", shipmentRoutes)
+app.use("/api/roles", roleRoutes)
+app.use("/api/menu-options", menuOptionRoutes)
+app.use("/api/permissions", permissionRoutes)
+app.use("/api/stages", stagesRoutes)
+app.use("/api/forms", formsRoutes)
+app.use("/api/pages", pageRoutes)
+
 // app.use('/api/drug-shipments', drugShipmentRoutes);
 
 // app.use("/api/drug-shipments", drugShipmentRoutes);

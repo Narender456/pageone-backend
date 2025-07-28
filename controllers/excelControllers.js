@@ -41,66 +41,70 @@ class ExcelFileController {
 
   // Create Excel file entry
   static async createExcel(req, res) {
-    try {
-      const { excel_name, Studies, selectedStudies, isActive } = req.body;
-      
-      // Determine which studies array to use
-      const studiesArray = selectedStudies || Studies || [];
-      
-      const newExcel = new ExcelFile({
-        excel_name: excel_name || "Unnamed Excel",
-        file: `uploads/excel_files/pending_${Date.now()}.xlsx`, // Placeholder
-        Studies: studiesArray,
-        selectedStudies: studiesArray, // Sync both fields
-        isActive: isActive !== undefined ? isActive : true,
-        temporary: true,
-        date_created: new Date(),
-        last_updated: new Date()
-      });
-      
-      await newExcel.save();
-      
-      // Populate the studies before sending response
-      const populatedExcel = await ExcelFile.findById(newExcel._id)
-        .populate('Studies', 'study_name name')
-        .populate('selectedStudies', 'study_name name');
-      
-      res.status(201).json({ 
-        message: 'Excel created successfully', 
-        excel: populatedExcel 
-      });
-    } catch (error) {
-      console.error('Create Excel Error:', error);
-      res.status(500).json({ 
-        error: error.message,
-        details: 'Failed to create Excel file'
-      });
+      try {
+    const { excel_name, fileId, selectedStudies = [], isActive = true } = req.body;
+
+    if (!fileId) {
+      return res.status(400).json({ error: "Missing fileId. Upload the file first." });
     }
+
+    const file = await ExcelFile.findById(fileId);
+    if (!file) {
+      return res.status(404).json({ error: "Uploaded Excel file not found" });
+    }
+
+    // Update metadata
+    file.excel_name = excel_name || file.fileName || "Unnamed Excel";
+    file.selectedStudies = selectedStudies;
+    file.Studies = selectedStudies;
+    file.isActive = isActive;
+    file.last_updated = new Date();
+
+    await file.save();
+
+    const populated = await ExcelFile.findById(file._id)
+    .populate("Studies", "study_name protocol_number study_title")
+    .populate("selectedStudies", "study_name protocol_number study_title");
+
+
+    res.status(200).json({
+      message: "Excel metadata saved successfully",
+      excel: populated,
+    });
+  } catch (error) {
+    console.error("Create Excel Error:", error);
+    res.status(500).json({ error: "Failed to save Excel metadata", details: error.message });
+  }
   }
   
   // Upload Excel file
   static async uploadFile(req, res) {
-    try {
-      if (!req.file) {
-        return res.status(400).json({ error: 'No file uploaded' });
-      }
-
-      const excelFile = new ExcelFile({
-        excel_name: req.file.originalname || "Uploaded Excel",
-        file: req.file.path,
-        temporary: req.body.temporary === 'false' ? false : true
-      });
-
-      await excelFile.save();
-
-      res.status(201).json({
-        message: 'File uploaded successfully',
-        file: excelFile,
-        fileUrl: excelFile.getAbsoluteUrl()
-      });
-    } catch (error) {
-      res.status(500).json({ error: error.message });
+  try {
+    if (!req.file) {
+      return res.status(400).json({ error: "No file uploaded" });
     }
+
+    const originalName = req.file.originalname;
+    const filePath = req.file.path;
+
+    const newFile = new ExcelFile({
+      fileName: originalName,
+      filePath: filePath, // ✅ this should point to uploaded location
+      temporary: req.body.temporary === "true", // Parse string to boolean
+    });
+
+    const savedFile = await newFile.save();
+
+    res.status(201).json({
+      message: "File uploaded successfully",
+      file: savedFile,
+      fileId: savedFile._id,
+      fileUrl: savedFile.getAbsoluteUrl?.() || null,
+    });
+  } catch (error) {
+    console.error("Upload Error:", error);
+    res.status(500).json({ error: "Failed to upload Excel file", details: error.message });
+  }
   }
 
   // Get all Excel files
@@ -116,8 +120,8 @@ class ExcelFileController {
       
       // Get files with pagination
       const files = await ExcelFile.find()
-        .populate('Studies', 'study_name name')
-        .populate('selectedStudies', 'study_name name')
+        .populate("Studies", "study_name protocol_number study_title")
+        .populate("selectedStudies", "study_name protocol_number study_title")
         .sort(sort)
         .skip(skip)
         .limit(parseInt(limit));
@@ -329,117 +333,115 @@ class ExcelFileController {
 
 class ExcelDataRowController {
 
-  // Create data rows from Excel file - FIXED VERSION
-  static async createRowsFromFile(req, res) {
+ // Create data rows from Excel file - FIXED VERSION
+static async createRowsFromFile(req, res) {
+  try {
+    const { fileId, studyIds } = req.body;
+
+    // Validate input
+    if (!fileId) {
+      return res.status(400).json({ error: 'fileId is required' });
+    }
+
+    const file = await ExcelFile.findById(fileId);
+    if (!file || !file.filePath) {
+      return res.status(404).json({ error: 'Excel file not found or missing filePath' });
+    }
+
+    // Get the absolute file path
+    const filePath = path.resolve(file.filePath);
+
+    // Check if file exists
     try {
-      const { fileId, studyIds } = req.body;
-      
-      // Validate input
-      if (!fileId) {
-        return res.status(400).json({ error: 'fileId is required' });
-      }
-      
-      const file = await ExcelFile.findById(fileId);
-      if (!file) {
-        return res.status(404).json({ error: 'Excel file not found' });
-      }
-
-      // Get the absolute file path
-      const filePath = path.resolve(file.file);
-      
-      // Check if file exists
-      try {
-        await fs.access(filePath);
-      } catch (error) {
-        console.error('File access error:', error);
-        return res.status(404).json({ 
-          error: 'Physical file not found',
-          details: `File path: ${filePath}`
-        });
-      }
-
-      // Read and parse Excel file
-      let workbook, jsonData;
-      try {
-        workbook = XLSX.readFile(filePath);
-        const sheetName = workbook.SheetNames[0];
-        
-        if (!sheetName) {
-          return res.status(400).json({ error: 'No sheets found in Excel file' });
-        }
-        
-        const worksheet = workbook.Sheets[sheetName];
-        jsonData = XLSX.utils.sheet_to_json(worksheet);
-        
-        if (!jsonData || jsonData.length === 0) {
-          return res.status(400).json({ error: 'No data found in Excel file' });
-        }
-      } catch (error) {
-        console.error('Excel parsing error:', error);
-        return res.status(400).json({ 
-          error: 'Failed to parse Excel file',
-          details: error.message
-        });
-      }
-
-      // Create data rows
-      const dataRows = [];
-      const errors = [];
-      
-      for (let i = 0; i < jsonData.length; i++) {
-        try {
-          const rowData = jsonData[i];
-          
-          // Skip empty rows
-          if (!rowData || Object.keys(rowData).length === 0) {
-            continue;
-          }
-          
-          const excelDataRow = new ExcelDataRow({
-            excelFile: fileId,
-            rowData: rowData,
-            studies: studyIds || []
-          });
-          
-          const savedRow = await excelDataRow.save();
-          dataRows.push(savedRow);
-        } catch (error) {
-          console.error(`Error creating row ${i}:`, error);
-          errors.push({
-            row: i,
-            error: error.message
-          });
-        }
-      }
-
-      // Update the Excel file to mark it as processed
-      await ExcelFile.findByIdAndUpdate(fileId, {
-        temporary: false,
-        last_updated: new Date()
-      });
-
-      const response = {
-        message: `Successfully created ${dataRows.length} data rows from Excel file`,
-        totalRows: jsonData.length,
-        createdRows: dataRows.length,
-        skippedRows: jsonData.length - dataRows.length,
-        rows: dataRows
-      };
-
-      if (errors.length > 0) {
-        response.errors = errors;
-        response.message += ` (${errors.length} errors occurred)`;
-      }
-
-      res.status(201).json(response);
+      await fs.access(filePath);
     } catch (error) {
-      console.error('Create Rows From File Error:', error);
-      res.status(500).json({ 
-        error: error.message,
-        details: 'Failed to create data rows from Excel file'
+      console.error('File access error:', error);
+      return res.status(404).json({ 
+        error: 'Physical file not found',
+        details: `File path: ${filePath}`
       });
     }
+
+    // Read and parse Excel file
+    let workbook, jsonData;
+    try {
+      workbook = XLSX.readFile(filePath);
+      const sheetName = workbook.SheetNames[0];
+
+      if (!sheetName) {
+        return res.status(400).json({ error: 'No sheets found in Excel file' });
+      }
+
+      const worksheet = workbook.Sheets[sheetName];
+      jsonData = XLSX.utils.sheet_to_json(worksheet);
+
+      if (!jsonData || jsonData.length === 0) {
+        return res.status(400).json({ error: 'No data found in Excel file' });
+      }
+    } catch (error) {
+      console.error('Excel parsing error:', error);
+      return res.status(400).json({ 
+        error: 'Failed to parse Excel file',
+        details: error.message
+      });
+    }
+
+    // Create data rows
+    const dataRows = [];
+    const errors = [];
+
+    for (let i = 0; i < jsonData.length; i++) {
+      try {
+        const rowData = jsonData[i];
+
+        if (!rowData || Object.keys(rowData).length === 0) continue;
+
+        const excelDataRow = new ExcelDataRow({
+          excelFile: fileId,
+          rowData,
+          studies: studyIds || []
+        });
+
+        const savedRow = await excelDataRow.save();
+        dataRows.push(savedRow);
+      } catch (error) {
+        console.error(`Error creating row ${i}:`, error);
+        errors.push({
+          row: i,
+          error: error.message
+        });
+      }
+    }
+
+    // Update Excel file status
+    await ExcelFile.findByIdAndUpdate(fileId, {
+      temporary: false,
+      last_updated: new Date()
+    });
+
+    const response = {
+      message: `Successfully created ${dataRows.length} data rows from Excel file`,
+      totalRows: jsonData.length,
+      createdRows: dataRows.length,
+      skippedRows: jsonData.length - dataRows.length,
+      rows: dataRows
+    };
+
+    if (errors.length > 0) {
+      response.errors = errors;
+      response.message += ` (${errors.length} errors occurred)`;
+    }
+
+    res.status(201).json(response);
+  } catch (error) {
+    console.error('Create Rows From File Error:', error);
+    res.status(500).json({ 
+      error: error.message,
+      details: 'Failed to create data rows from Excel file'
+    });
   }
+}
+
 
   // Get all data rows
   static async getAllRows(req, res) {

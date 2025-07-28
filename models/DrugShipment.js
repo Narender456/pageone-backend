@@ -40,7 +40,7 @@ const drugShipmentSchema = new mongoose.Schema(
     excelRows: [
       {
         type: mongoose.Schema.Types.ObjectId,
-        ref: "ExcelFile",
+        ref: "ExcelDataRow",
       },
     ],
     uniqueId: {

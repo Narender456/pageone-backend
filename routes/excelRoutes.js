@@ -16,7 +16,7 @@ router.get('/stats', ExcelFileController.getStats);
 
 
 // Excel Data Row Routes
-router.post('/rows/create-from-file', ExcelDataRowController.createRowsFromFile); 
+router.post('/rows/create-from-file', ExcelDataRowController.createRowsFromFile);
 router.get('/rows', ExcelDataRowController.getAllRows);
 router.get('/rows/:id', ExcelDataRowController.getRowById);
 router.put('/rows/:id', ExcelDataRowController.updateRow);

@@ -21,7 +21,7 @@ const shipmentAcknowledgmentSchema = new mongoose.Schema(
     },
     excelRow: {
       type: mongoose.Schema.Types.ObjectId,
-      ref: "ExcelFile",
+      ref: "ExcelDataRow",
     },
     acknowledgedQuantity: {
       type: Number,

@@ -8,6 +8,12 @@ const studySchema = new Schema({
     required: true,
     maxlength: 255,
   },
+  studyCode: {
+  type: String,
+  required: true,
+  maxlength: 10,
+},
+
   protocol_number: {
     type: String,
     required: true,
