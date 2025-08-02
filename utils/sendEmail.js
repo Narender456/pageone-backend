@@ -25,4 +25,19 @@ const sendEmail = async (options) => {
   console.log("Message sent: %s", info.messageId)
 }
 
-module.exports = { sendEmail }
+// Wrapper function to match the expected interface in your controller
+const sendEmailNotification = async (options) => {
+  try {
+    await sendEmail({
+      email: options.user?.email || process.env.ADMIN_EMAIL || 'admin@example.com',
+      subject: options.subject,
+      message: options.message,
+      html: `<p>${options.message}</p>`
+    })
+  } catch (error) {
+    console.error('Failed to send email notification:', error)
+    // Don't throw error to prevent breaking the main functionality
+  }
+}
+
+module.exports = { sendEmail, sendEmailNotification }

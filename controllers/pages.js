@@ -19,12 +19,14 @@ const {
 const { sendEmailNotification } = require("../utils/sendEmail")
 
 // Get all pages with filtering and pagination
+// Get all pages with filtering and pagination
 exports.getPages = async (req, res) => {
   try {
     const { study = "all", site = "all", page = 1, limit = 10, search = "" } = req.query
 
-    // Determine permissions
-    const { canEdit, canDelete } = await determinePermissions(req.user, "page_list")
+    // Determine permissions - FIXED: Handle object return format
+    const permissions = await determinePermissions(req.user, "page_list")
+    const { canEdit, canDelete } = permissions
 
     // Build filter
     const filter = buildPageFilter(study, site)
@@ -68,7 +70,6 @@ exports.getPages = async (req, res) => {
     })
   }
 }
-
 // Get single page
 exports.getPage = async (req, res) => {
   try {
@@ -104,6 +105,7 @@ exports.getPage = async (req, res) => {
 }
 
 // Create new page
+// Create new page
 exports.createPage = async (req, res) => {
   try {
     const { canEdit } = await determinePermissions(req.user, "page_list")
@@ -115,13 +117,73 @@ exports.createPage = async (req, res) => {
       })
     }
 
-    const pageData = req.body
+    const pageData = { ...req.body }
 
     // Validate required fields
     if (!pageData.title || !pageData.stages) {
       return res.status(400).json({
         success: false,
         message: "Title and stage are required",
+      })
+    }
+
+    // Fix sites field - handle various formats
+    if (pageData.sites) {
+      if (typeof pageData.sites === 'string') {
+        try {
+          // Try to parse as JSON first
+          pageData.sites = JSON.parse(pageData.sites)
+        } catch (e) {
+          // If JSON.parse fails, treat as single site ID
+          pageData.sites = [pageData.sites]
+        }
+      }
+      
+      // Handle compound IDs (site-study format) and extract just the site part
+      if (Array.isArray(pageData.sites)) {
+        pageData.sites = pageData.sites.map(site => {
+          if (typeof site === 'string' && site.includes('-')) {
+            return site.split('-')[0] // Take the first part before the hyphen
+          }
+          return site
+        }).filter(site => site && site.length === 24) // Only keep valid ObjectId lengths
+      }
+    }
+
+    // Fix studies field - handle various formats
+    if (pageData.studies) {
+      if (typeof pageData.studies === 'string') {
+        try {
+          pageData.studies = JSON.parse(pageData.studies)
+        } catch (e) {
+          pageData.studies = [pageData.studies]
+        }
+      }
+      
+      // Handle compound IDs and extract study part
+      if (Array.isArray(pageData.studies)) {
+        pageData.studies = pageData.studies.map(study => {
+          if (typeof study === 'string' && study.includes('-')) {
+            return study.split('-')[1] // Take the second part after the hyphen
+          }
+          return study
+        }).filter(study => study && study.length === 24) // Only keep valid ObjectId lengths
+      }
+    }
+
+    // Handle empty shipment field
+    if (pageData.shipment === '' || pageData.shipment === null || pageData.shipment === undefined) {
+      delete pageData.shipment
+    }
+
+    // Handle siteStudyAssignments - clean up empty shipments
+    if (pageData.siteStudyAssignments && Array.isArray(pageData.siteStudyAssignments)) {
+      pageData.siteStudyAssignments = pageData.siteStudyAssignments.map(assignment => {
+        const cleanAssignment = { ...assignment }
+        if (cleanAssignment.shipment === '' || cleanAssignment.shipment === null || cleanAssignment.shipment === undefined) {
+          delete cleanAssignment.shipment
+        }
+        return cleanAssignment
       })
     }
 
@@ -165,6 +227,7 @@ exports.createPage = async (req, res) => {
 }
 
 // Update page
+// Update page
 exports.updatePage = async (req, res) => {
   try {
     const { slug } = req.params
@@ -202,8 +265,71 @@ exports.updatePage = async (req, res) => {
       })
     }
 
-    // Update page
-    Object.assign(page, req.body)
+    // Clean the request body data before updating
+    const updateData = { ...req.body }
+
+    // Fix sites field - handle various formats
+    if (updateData.sites) {
+      if (typeof updateData.sites === 'string') {
+        try {
+          // Try to parse as JSON first
+          updateData.sites = JSON.parse(updateData.sites)
+        } catch (e) {
+          // If JSON.parse fails, treat as single site ID
+          updateData.sites = [updateData.sites]
+        }
+      }
+      
+      // Handle compound IDs (site-study format) and extract just the site part
+      if (Array.isArray(updateData.sites)) {
+        updateData.sites = updateData.sites.map(site => {
+          if (typeof site === 'string' && site.includes('-')) {
+            return site.split('-')[0] // Take the first part before the hyphen
+          }
+          return site
+        }).filter(site => site && site.length === 24) // Only keep valid ObjectId lengths
+      }
+    }
+
+    // Fix studies field - handle various formats
+    if (updateData.studies) {
+      if (typeof updateData.studies === 'string') {
+        try {
+          updateData.studies = JSON.parse(updateData.studies)
+        } catch (e) {
+          updateData.studies = [updateData.studies]
+        }
+      }
+      
+      // Handle compound IDs and extract study part
+      if (Array.isArray(updateData.studies)) {
+        updateData.studies = updateData.studies.map(study => {
+          if (typeof study === 'string' && study.includes('-')) {
+            return study.split('-')[1] // Take the second part after the hyphen
+          }
+          return study
+        }).filter(study => study && study.length === 24) // Only keep valid ObjectId lengths
+      }
+    }
+
+    // Handle empty shipment field
+    if (updateData.shipment === '' || updateData.shipment === null || updateData.shipment === undefined) {
+      delete updateData.shipment
+    }
+
+    // Handle siteStudyAssignments - clean up empty shipments
+    if (updateData.siteStudyAssignments && Array.isArray(updateData.siteStudyAssignments)) {
+      updateData.siteStudyAssignments = updateData.siteStudyAssignments.map(assignment => {
+        const cleanAssignment = { ...assignment }
+        if (cleanAssignment.shipment === '' || cleanAssignment.shipment === null || cleanAssignment.shipment === undefined) {
+          delete cleanAssignment.shipment
+        }
+        return cleanAssignment
+      })
+    }
+
+    // Update page with cleaned data
+    Object.assign(page, updateData)
 
     // Mark as edited if first time
     if (!page.isEdited) {

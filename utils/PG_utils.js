@@ -28,9 +28,16 @@ function getCurrentTime() {
 }
 
 // Determine user permissions
+// Determine user permissions
 async function determinePermissions(user, url) {
+  // FIXED: Handle undefined user
+  if (!user) {
+    console.warn('determinePermissions called with undefined user')
+    return { canEdit: false, canDelete: false }
+  }
+
   if (user.role === "admin" || user.isSuperuser) {
-    return [true, true]
+    return { canEdit: true, canDelete: true }
   }
 
   if (user.role) {
@@ -40,14 +47,14 @@ async function determinePermissions(user, url) {
       const canEdit = permissions.some((p) => p.menuOption && p.menuOption.url === url && p.canEdit)
       const canDelete = permissions.some((p) => p.menuOption && p.menuOption.url === url && p.canDelete)
 
-      return [canEdit, canDelete]
+      return { canEdit, canDelete }
     } catch (error) {
       console.error("Error determining permissions:", error)
-      return [false, false]
+      return { canEdit: false, canDelete: false }
     }
   }
 
-  return [false, false]
+  return { canEdit: false, canDelete: false }
 }
 
 // Filter pages based on study and site
@@ -306,6 +313,22 @@ async function fetchShipments(studyId, siteId) {
   }
 }
 
+
+// Build page filter based on study and site
+function buildPageFilter(study, site) {
+  const filter = {}
+
+  if (study && study !== "all") {
+    filter.studies = { $in: [study] }
+  }
+
+  if (site && site !== "all") {
+    filter.sites = { $in: [site] }
+  }
+
+  return filter
+}
+
 module.exports = {
   generateSlugWithUuid,
   getCurrentTime,
@@ -320,4 +343,5 @@ module.exports = {
   validatePageData,
   processComponents,
   fetchShipments,
+  buildPageFilter, // Add this line
 }
